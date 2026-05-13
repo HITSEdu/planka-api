@@ -1,0 +1,69 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"planka-api/internal/config"
+	httpserver "planka-api/internal/http/server"
+)
+
+type App struct {
+	config config.Config
+	server *http.Server
+}
+
+func New() (*App, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+
+	srv := httpserver.New(cfg)
+
+	return &App{
+		config: cfg,
+		server: srv,
+	}, nil
+}
+
+func (a *App) Run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+
+	go func() {
+		log.Printf("starting HTTP server on %s (%s)", a.server.Addr, a.config.AppEnv)
+
+		if err := a.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+
+	select {
+	case <-ctx.Done():
+		log.Println("shutdown signal received")
+	case err := <-errCh:
+		if err != nil {
+			return fmt.Errorf("http server: %w", err)
+		}
+		return nil
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := a.server.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown server: %w", err)
+	}
+
+	return nil
+}

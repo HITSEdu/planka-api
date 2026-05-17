@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -12,10 +13,12 @@ import (
 
 	"planka-api/internal/config"
 	httpserver "planka-api/internal/http/server"
+	"planka-api/internal/postgres"
 )
 
 type App struct {
 	config config.Config
+	db     *sql.DB
 	server *http.Server
 }
 
@@ -25,15 +28,27 @@ func New() (*App, error) {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 
-	srv := httpserver.New(cfg)
+	db, err := postgres.Open(context.Background(), cfg.DatabaseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	srv := httpserver.New(cfg, db)
 
 	return &App{
 		config: cfg,
+		db:     db,
 		server: srv,
 	}, nil
 }
 
-func (a *App) Run() error {
+func (a *App) Run() (err error) {
+	defer func() {
+		if closeErr := a.db.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close postgres: %w", closeErr)
+		}
+	}()
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

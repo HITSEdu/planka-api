@@ -2,15 +2,6 @@
 
 ## Configuration
 
-```env
-APP_ENV=development
-HTTP_PORT=8080
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/planka_api?sslmode=disable
-CORS_ORIGINS=http://localhost:3000,http://localhost:5173
-ACCESS_TOKEN_TTL=15m
-REFRESH_TOKEN_TTL=720h
-```
-
 Before starting the API, apply the auth schema:
 
 ```sh

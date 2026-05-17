@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -12,6 +13,10 @@ type Config struct {
 	HTTPReadTimeout  time.Duration
 	HTTPWriteTimeout time.Duration
 	HTTPIdleTimeout  time.Duration
+	DatabaseURL      string
+	CORSOrigins      []string
+	AccessTokenTTL   time.Duration
+	RefreshTokenTTL  time.Duration
 }
 
 func Load() (Config, error) {
@@ -30,12 +35,26 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	accessTokenTTL, err := durationFromEnv("ACCESS_TOKEN_TTL", 15*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+
+	refreshTokenTTL, err := durationFromEnv("REFRESH_TOKEN_TTL", 30*24*time.Hour)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		AppEnv:           stringFromEnv("APP_ENV", "development"),
 		HTTPPort:         stringFromEnv("HTTP_PORT", "8080"),
 		HTTPReadTimeout:  readTimeout,
 		HTTPWriteTimeout: writeTimeout,
 		HTTPIdleTimeout:  idleTimeout,
+		DatabaseURL:      stringFromEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/planka_api?sslmode=disable"),
+		CORSOrigins:      csvFromEnv("CORS_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),
+		AccessTokenTTL:   accessTokenTTL,
+		RefreshTokenTTL:  refreshTokenTTL,
 	}, nil
 }
 
@@ -46,6 +65,28 @@ func stringFromEnv(key, fallback string) string {
 	}
 
 	return value
+}
+
+func csvFromEnv(key string, fallback []string) []string {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
+	}
+
+	if len(result) == 0 {
+		return fallback
+	}
+
+	return result
 }
 
 func durationFromEnv(key string, fallback time.Duration) (time.Duration, error) {

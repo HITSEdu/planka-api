@@ -43,12 +43,26 @@ type authRequest struct {
 	Name     string `json:"name"`
 }
 
+type apiAuthLoginRequest struct {
+	Email      string `json:"email"`
+	Password   string `json:"password"`
+	RememberMe bool   `json:"rememberMe"`
+}
+
 type refreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
+type apiAuthRefreshRequest struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
 type logoutRequest struct {
 	RefreshToken string `json:"refresh_token"`
+}
+
+type apiAuthLogoutRequest struct {
+	RefreshToken string `json:"refreshToken"`
 }
 
 type oauthTokenRequest struct {
@@ -73,6 +87,17 @@ type tokenResponse struct {
 	RefreshToken          string       `json:"refresh_token"`
 	RefreshTokenExpiresIn int64        `json:"refresh_token_expires_in"`
 	User                  userResponse `json:"user"`
+}
+
+type apiAuthLoginResponse struct {
+	AccessToken    string `json:"accessToken"`
+	RefreshToken   string `json:"refreshToken"`
+	LoginSucceeded bool   `json:"loginSucceeded"`
+}
+
+type apiAuthRefreshResponse struct {
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken"`
 }
 
 func (a *Auth) Register(w http.ResponseWriter, r *http.Request) {
@@ -123,6 +148,30 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.writeTokenPair(w, r.Context(), user, http.StatusOK)
+}
+
+func (a *Auth) APILogin(w http.ResponseWriter, r *http.Request) {
+	var req apiAuthLoginRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	user, ok := a.authenticatePassword(w, r.Context(), req.Email, req.Password)
+	if !ok {
+		return
+	}
+
+	pair, err := a.createTokenPair(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not create tokens")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, apiAuthLoginResponse{
+		AccessToken:    pair.AccessToken,
+		RefreshToken:   pair.RefreshToken,
+		LoginSucceeded: true,
+	})
 }
 
 func (a *Auth) Token(w http.ResponseWriter, r *http.Request) {
@@ -245,6 +294,29 @@ func (a *Auth) Refresh(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a.tokenResponse(pair, user))
 }
 
+func (a *Auth) APIRefresh(w http.ResponseWriter, r *http.Request) {
+	var req apiAuthRefreshRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	refreshToken := strings.TrimSpace(req.RefreshToken)
+	if refreshToken == "" {
+		writeError(w, http.StatusBadRequest, "refreshToken is required")
+		return
+	}
+
+	pair, _, ok := a.rotateRefreshToken(w, r.Context(), refreshToken)
+	if !ok {
+		return
+	}
+
+	writeJSON(w, http.StatusOK, apiAuthRefreshResponse{
+		AccessToken:  pair.AccessToken,
+		RefreshToken: pair.RefreshToken,
+	})
+}
+
 func (a *Auth) rotateRefreshToken(w http.ResponseWriter, ctx context.Context, refreshToken string) (tokenPair, userResponse, bool) {
 	refreshToken = strings.TrimSpace(refreshToken)
 	if refreshToken == "" {
@@ -315,6 +387,45 @@ func (a *Auth) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.RefreshToken) != "" {
 		_, _ = a.db.ExecContext(r.Context(), `UPDATE auth_tokens SET revoked_at = now() WHERE refresh_token_hash = $1`, tokenHash(req.RefreshToken))
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *Auth) APILogout(w http.ResponseWriter, r *http.Request) {
+	var req apiAuthLogoutRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	accessToken := bearerToken(r)
+	refreshToken := strings.TrimSpace(req.RefreshToken)
+	if accessToken == "" && refreshToken == "" {
+		writeError(w, http.StatusBadRequest, "access token or refreshToken is required")
+		return
+	}
+
+	if accessToken != "" {
+		_, _ = a.db.ExecContext(r.Context(), `UPDATE auth_tokens SET revoked_at = now() WHERE access_token_hash = $1`, tokenHash(accessToken))
+	}
+	if refreshToken != "" {
+		_, _ = a.db.ExecContext(r.Context(), `UPDATE auth_tokens SET revoked_at = now() WHERE refresh_token_hash = $1`, tokenHash(refreshToken))
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *Auth) APIRevokeAll(w http.ResponseWriter, r *http.Request) {
+	user, ok := a.userFromAccessToken(w, r)
+	if !ok {
+		return
+	}
+
+	if _, err := a.db.ExecContext(
+		r.Context(),
+		`UPDATE auth_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`,
+		user.ID,
+	); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not revoke tokens")
+		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)

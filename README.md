@@ -8,7 +8,26 @@ Before starting the API, apply the auth schema:
 psql "$DATABASE_URL" -f migrations/001_auth.sql
 ```
 
+With Docker Compose the schema is applied automatically when the Postgres volume is created:
+
+```sh
+docker compose up --build
+```
+
 ## Auth endpoints
+
+Planka-compatible endpoints:
+
+- `POST /api/Auth/login` with `{ "email": "user@example.com", "password": "string", "rememberMe": true }`
+  returns `{ "accessToken": "...", "refreshToken": "...", "loginSucceeded": true }`
+- `POST /api/Auth/refresh` with `{ "refreshToken": "..." }`
+  returns `{ "accessToken": "...", "refreshToken": "..." }`
+- `POST /api/Auth/logout` with `Authorization: Bearer <accessToken>` and/or `{ "refreshToken": "..." }`
+  returns `204 No Content`
+- `POST /api/Auth/revoke_all` with `Authorization: Bearer <accessToken>`
+  returns `204 No Content`
+
+Existing endpoints:
 
 - `POST /auth/register` with `{ "email": "...", "password": "...", "name": "..." }`
 - `POST /auth/login` with `{ "email": "...", "password": "..." }`

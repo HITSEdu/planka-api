@@ -11,6 +11,8 @@ psql "$DATABASE_URL" -f migrations/001_auth.sql
 With Docker Compose the schema is applied automatically when the Postgres volume is created:
 
 ```sh
+cp .env.example .env
+# set POSTGRES_PASSWORD in .env before starting
 docker compose up --build
 ```
 

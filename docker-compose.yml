@@ -4,7 +4,7 @@ services:
     environment:
       APP_ENV: development
       HTTP_PORT: "8080"
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/planka_api?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-planka_api}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-planka_api}?sslmode=disable
       CORS_ORIGINS: http://localhost:3000,http://localhost:5173
       ACCESS_TOKEN_TTL: 15m
       REFRESH_TOKEN_TTL: 720h
@@ -17,16 +17,16 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: planka_api
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-planka_api}
+      POSTGRES_USER: ${POSTGRES_USER:-planka_api}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations/001_auth.sql:/docker-entrypoint-initdb.d/001_auth.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d planka_api"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 10

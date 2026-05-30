@@ -12,8 +12,12 @@ import (
 func New(cfg config.Config, db *sql.DB) *http.Server {
 	mux := http.NewServeMux()
 	authHandler := handlers.NewAuth(db, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
+	scheduleHandler := handlers.NewSchedules(db)
 
 	mux.HandleFunc("GET /healthz", handlers.Health)
+	mux.HandleFunc("GET /swagger", handlers.SwaggerUI)
+	mux.HandleFunc("GET /swagger/", handlers.SwaggerUI)
+	mux.HandleFunc("GET /openapi.json", handlers.OpenAPI)
 	mux.HandleFunc("POST /auth/register", authHandler.Register)
 	mux.HandleFunc("POST /auth/login", authHandler.Login)
 	mux.HandleFunc("POST /auth/refresh", authHandler.Refresh)
@@ -25,6 +29,11 @@ func New(cfg config.Config, db *sql.DB) *http.Server {
 	mux.HandleFunc("POST /api/Auth/revoke_all", authHandler.APIRevokeAll)
 	mux.HandleFunc("POST /oauth/token", authHandler.Token)
 	mux.HandleFunc("POST /oauth/revoke", authHandler.Revoke)
+	mux.HandleFunc("GET /schedules", scheduleHandler.List)
+	mux.HandleFunc("POST /schedules", scheduleHandler.Create)
+	mux.HandleFunc("GET /schedules/{id}", scheduleHandler.Get)
+	mux.HandleFunc("PATCH /schedules/{id}", scheduleHandler.Update)
+	mux.HandleFunc("DELETE /schedules/{id}", scheduleHandler.Delete)
 
 	return &http.Server{
 		Addr:              ":" + cfg.HTTPPort,

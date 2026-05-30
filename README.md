@@ -2,10 +2,11 @@
 
 ## Configuration
 
-Before starting the API, apply the auth schema:
+Before starting the API, apply the schema:
 
 ```sh
 psql "$DATABASE_URL" -f migrations/001_auth.sql
+psql "$DATABASE_URL" -f migrations/002_schedules.sql
 ```
 
 With Docker Compose the schema is applied automatically when the Postgres volume is created:
@@ -14,6 +15,20 @@ With Docker Compose the schema is applied automatically when the Postgres volume
 cp .env.example .env
 # set POSTGRES_PASSWORD in .env before starting
 docker compose up --build
+```
+
+## Swagger
+
+After starting the API, open:
+
+```text
+http://localhost:8080/swagger/
+```
+
+The OpenAPI document is available at:
+
+```text
+http://localhost:8080/openapi.json
 ```
 
 ## Auth endpoints
@@ -42,3 +57,13 @@ OAuth2-style endpoints are also available:
 - `POST /oauth/token` with form or JSON `grant_type=password`, `username` or `email`, and `password`
 - `POST /oauth/token` with form or JSON `grant_type=refresh_token` and `refresh_token`
 - `POST /oauth/revoke` with form or JSON `token`
+
+## Schedule endpoints
+
+All schedule endpoints require `Authorization: Bearer <access_token>`.
+
+- `GET /schedules`
+- `POST /schedules` with `{ "title": "Work" }`
+- `GET /schedules/{id}`
+- `PATCH /schedules/{id}` with `{ "title": "Updated title" }`
+- `DELETE /schedules/{id}`

@@ -21,15 +21,18 @@ func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
 	allowAny := false
 
 	for _, origin := range allowedOrigins {
+		origin = normalizeOrigin(origin)
 		if origin == "*" {
 			allowAny = true
 			continue
 		}
-		allowed[strings.TrimSpace(origin)] = struct{}{}
+		if origin != "" {
+			allowed[origin] = struct{}{}
+		}
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
+		origin := normalizeOrigin(r.Header.Get("Origin"))
 		if origin != "" {
 			if allowAny {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -39,8 +42,9 @@ func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
 
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.Header().Set("Access-Control-Allow-Headers", allowedHeaders(r))
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Max-Age", "600")
 		}
 
 		if r.Method == http.MethodOptions {
@@ -50,4 +54,17 @@ func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func normalizeOrigin(origin string) string {
+	return strings.TrimRight(strings.TrimSpace(origin), "/")
+}
+
+func allowedHeaders(r *http.Request) string {
+	requested := strings.TrimSpace(r.Header.Get("Access-Control-Request-Headers"))
+	if requested != "" {
+		return requested
+	}
+
+	return "Authorization, Content-Type"
 }

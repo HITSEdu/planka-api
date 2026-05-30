@@ -52,9 +52,14 @@ func Load() (Config, error) {
 		HTTPWriteTimeout: writeTimeout,
 		HTTPIdleTimeout:  idleTimeout,
 		DatabaseURL:      stringFromEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/planka_api?sslmode=disable"),
-		CORSOrigins:      csvFromEnv("CORS_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),
-		AccessTokenTTL:   accessTokenTTL,
-		RefreshTokenTTL:  refreshTokenTTL,
+		CORSOrigins: csvFromEnv("CORS_ORIGINS", []string{
+			"http://localhost:3000",
+			"http://localhost:5173",
+			"http://127.0.0.1:3000",
+			"http://127.0.0.1:5173",
+		}),
+		AccessTokenTTL:  accessTokenTTL,
+		RefreshTokenTTL: refreshTokenTTL,
 	}, nil
 }
 

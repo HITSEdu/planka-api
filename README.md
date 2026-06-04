@@ -35,6 +35,8 @@ http://localhost:8080/openapi.json
 
 Planka-compatible endpoints:
 
+- `POST /api/Auth/register` with `{ "email": "user@example.com", "password": "string", "name": "User" }`
+  returns `{ "accessToken": "...", "refreshToken": "...", "loginSucceeded": true }`
 - `POST /api/Auth/login` with `{ "email": "user@example.com", "password": "string", "rememberMe": true }`
   returns `{ "accessToken": "...", "refreshToken": "...", "loginSucceeded": true }`
 - `POST /api/Auth/refresh` with `{ "refreshToken": "..." }`
@@ -43,6 +45,8 @@ Planka-compatible endpoints:
   returns `204 No Content`
 - `POST /api/Auth/revoke_all` with `Authorization: Bearer <accessToken>`
   returns `204 No Content`
+- `GET /api/Profile` with `Authorization: Bearer <accessToken>`
+  returns current user profile
 
 Existing endpoints:
 

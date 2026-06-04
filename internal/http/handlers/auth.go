@@ -100,6 +100,16 @@ type apiAuthRefreshResponse struct {
 	RefreshToken string `json:"refreshToken"`
 }
 
+type apiProfileResponse struct {
+	ID         string  `json:"id"`
+	Email      string  `json:"email"`
+	LastName   *string `json:"lastName"`
+	FirstName  *string `json:"firstName"`
+	Patronymic *string `json:"patronymic"`
+	BirthDate  string  `json:"birthDate"`
+	Gender     string  `json:"gender"`
+}
+
 func (a *Auth) Register(w http.ResponseWriter, r *http.Request) {
 	var req authRequest
 	if !decodeJSON(w, r, &req) {
@@ -134,6 +144,52 @@ func (a *Auth) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.writeTokenPair(w, r.Context(), user, http.StatusCreated)
+}
+
+func (a *Auth) APIRegister(w http.ResponseWriter, r *http.Request) {
+	var req authRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	email := normalizeEmail(req.Email)
+	if email == "" || len(req.Password) < 8 {
+		writeError(w, http.StatusBadRequest, "email and password with at least 8 characters are required")
+		return
+	}
+
+	passwordHash, err := hashPassword(req.Password)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not hash password")
+		return
+	}
+
+	var user userResponse
+	err = a.db.QueryRowContext(
+		r.Context(),
+		`INSERT INTO users (email, password_hash, name)
+		 VALUES ($1, $2, NULLIF($3, ''))
+		 RETURNING id::text, email, COALESCE(name, ''), created_at`,
+		email,
+		passwordHash,
+		strings.TrimSpace(req.Name),
+	).Scan(&user.ID, &user.Email, &user.Name, &user.CreatedAt)
+	if err != nil {
+		writeError(w, http.StatusConflict, "user already exists")
+		return
+	}
+
+	pair, err := a.createTokenPair(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not create tokens")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, apiAuthLoginResponse{
+		AccessToken:    pair.AccessToken,
+		RefreshToken:   pair.RefreshToken,
+		LoginSucceeded: true,
+	})
 }
 
 func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
@@ -438,6 +494,26 @@ func (a *Auth) Me(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, user)
+}
+
+func (a *Auth) APIProfile(w http.ResponseWriter, r *http.Request) {
+	user, ok := a.userFromAccessToken(w, r)
+	if !ok {
+		return
+	}
+
+	var firstName *string
+	if user.Name != "" {
+		firstName = &user.Name
+	}
+
+	writeJSON(w, http.StatusOK, apiProfileResponse{
+		ID:        user.ID,
+		Email:     user.Email,
+		FirstName: firstName,
+		BirthDate: "",
+		Gender:    "NotDefined",
+	})
 }
 
 func (a *Auth) userFromAccessToken(w http.ResponseWriter, r *http.Request) (userResponse, bool) {

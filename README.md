@@ -78,6 +78,8 @@ All schedule endpoints require `Authorization: Bearer <access_token>`.
 All event endpoints require `Authorization: Bearer <access_token>`.
 
 - `GET /events`
+- `GET /events?tag_id=00000000-0000-0000-0000-000000000000`
+- `GET /events?tag_name=planning`
 - `POST /events` with `{ "title": "Planning", "description": "Sprint planning", "starts_at": "2026-06-16T09:00:00Z", "ends_at": "2026-06-16T10:00:00Z", "focus": 1 }`
 - `GET /events/{id}`
 - `PATCH /events/{id}` with the same body as create

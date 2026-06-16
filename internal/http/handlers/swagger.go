@@ -250,11 +250,13 @@ func pathsSpec() map[string]any {
 		},
 		"/events": map[string]any{
 			"get": map[string]any{
-				"tags":     []string{"Events"},
-				"summary":  "List events",
-				"security": bearerSecurity(),
+				"tags":       []string{"Events"},
+				"summary":    "List events",
+				"security":   bearerSecurity(),
+				"parameters": []any{queryUUIDParameter("tag_id", "Filter events by tag id"), queryStringParameter("tag_name", "Filter events by tag name")},
 				"responses": responseMap(
 					response("200", "Events", arraySchema(refSchema("Event"))),
+					errorResponse("400"),
 					errorResponse("401"),
 				),
 			},
@@ -450,5 +452,25 @@ func pathUUIDParameter(name string) map[string]any {
 		"in":       "path",
 		"required": true,
 		"schema":   uuidSchema(),
+	}
+}
+
+func queryUUIDParameter(name, description string) map[string]any {
+	return map[string]any{
+		"name":        name,
+		"in":          "query",
+		"required":    false,
+		"description": description,
+		"schema":      uuidSchema(),
+	}
+}
+
+func queryStringParameter(name, description string) map[string]any {
+	return map[string]any{
+		"name":        name,
+		"in":          "query",
+		"required":    false,
+		"description": description,
+		"schema":      stringSchema("planning"),
 	}
 }

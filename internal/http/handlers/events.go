@@ -45,6 +45,11 @@ type normalizedEventRequest struct {
 	Focus       float64
 }
 
+type eventTagFilter struct {
+	ID   string
+	Name string
+}
+
 type eventScanner interface {
 	Scan(dest ...any) error
 }
@@ -55,12 +60,44 @@ func (e *Events) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tagFilter, ok := eventTagFilterFromRequest(w, r)
+	if !ok {
+		return
+	}
+
+	query := eventSelectSQL + `
+		 WHERE a.owner_id = $1`
+	args := []any{user.ID}
+
+	if tagFilter.ID != "" {
+		query += `
+		   AND EXISTS (
+		       SELECT 1
+		       FROM event_tags et
+		       WHERE et.event_id = e.id
+		         AND et.tag_id = $2
+		   )`
+		args = append(args, tagFilter.ID)
+	}
+	if tagFilter.Name != "" {
+		query += `
+		   AND EXISTS (
+		       SELECT 1
+		       FROM event_tags et
+		       JOIN tags t ON t.id = et.tag_id
+		       WHERE et.event_id = e.id
+		         AND t.name = $2
+		   )`
+		args = append(args, tagFilter.Name)
+	}
+
+	query += `
+		 ORDER BY COALESCE(e.starts_at, e.created_at) DESC, e.created_at DESC`
+
 	rows, err := e.db.QueryContext(
 		r.Context(),
-		eventSelectSQL+`
-		 WHERE a.owner_id = $1
-		 ORDER BY COALESCE(e.starts_at, e.created_at) DESC, e.created_at DESC`,
-		user.ID,
+		query,
+		args...,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list events")
@@ -283,6 +320,26 @@ func decodeEventRequest(w http.ResponseWriter, r *http.Request) (normalizedEvent
 		StartsAt:    req.StartsAt,
 		EndsAt:      req.EndsAt,
 		Focus:       req.Focus,
+	}, true
+}
+
+func eventTagFilterFromRequest(w http.ResponseWriter, r *http.Request) (eventTagFilter, bool) {
+	tagID := strings.TrimSpace(r.URL.Query().Get("tag_id"))
+	tagName := strings.TrimSpace(r.URL.Query().Get("tag_name"))
+
+	if tagID != "" && tagName != "" {
+		writeError(w, http.StatusBadRequest, "only one tag filter is allowed")
+		return eventTagFilter{}, false
+	}
+
+	if tagID != "" && !isUUID(tagID) {
+		writeError(w, http.StatusBadRequest, "valid tag_id is required")
+		return eventTagFilter{}, false
+	}
+
+	return eventTagFilter{
+		ID:   tagID,
+		Name: tagName,
 	}, true
 }
 

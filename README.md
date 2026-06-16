@@ -7,6 +7,7 @@ Before starting the API, apply the schema:
 ```sh
 psql "$DATABASE_URL" -f migrations/001_auth.sql
 psql "$DATABASE_URL" -f migrations/002_schedules.sql
+psql "$DATABASE_URL" -f migrations/003_event_model.sql
 ```
 
 With Docker Compose the schema is applied automatically when the Postgres volume is created:
@@ -71,3 +72,13 @@ All schedule endpoints require `Authorization: Bearer <access_token>`.
 - `GET /schedules/{id}`
 - `PATCH /schedules/{id}` with `{ "title": "Updated title" }`
 - `DELETE /schedules/{id}`
+
+## Event data model
+
+The event schema from the diagram is implemented in `migrations/003_event_model.sql`.
+It adds:
+
+- `events` with title, optional description/date range, and focus.
+- `tags` with a hex color and many-to-many `event_tags`.
+- `event_accesses` with owner, `access_status`, and `event_access_allowed_users`.
+- `invitations` with sender, recipient, and `invitation_status`.

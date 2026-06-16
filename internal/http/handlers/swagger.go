@@ -105,6 +105,31 @@ func openAPISpec() map[string]any {
 						"updated_at": dateTimeSchema(),
 					},
 				},
+				"EventRequest": map[string]any{
+					"type":     "object",
+					"required": []string{"title"},
+					"properties": map[string]any{
+						"title":       stringSchema("Planning"),
+						"description": nullableStringSchema("Sprint planning"),
+						"starts_at":   nullableDateTimeSchema(),
+						"ends_at":     nullableDateTimeSchema(),
+						"focus":       numberSchema(1),
+					},
+				},
+				"Event": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":            uuidSchema(),
+						"title":         stringSchema("Planning"),
+						"description":   nullableStringSchema("Sprint planning"),
+						"starts_at":     nullableDateTimeSchema(),
+						"ends_at":       nullableDateTimeSchema(),
+						"focus":         numberSchema(1),
+						"access_status": stringSchema("PRIVATE"),
+						"created_at":    dateTimeSchema(),
+						"updated_at":    dateTimeSchema(),
+					},
+				},
 				"Error": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -223,6 +248,67 @@ func pathsSpec() map[string]any {
 				),
 			},
 		},
+		"/events": map[string]any{
+			"get": map[string]any{
+				"tags":     []string{"Events"},
+				"summary":  "List events",
+				"security": bearerSecurity(),
+				"responses": responseMap(
+					response("200", "Events", arraySchema(refSchema("Event"))),
+					errorResponse("401"),
+				),
+			},
+			"post": map[string]any{
+				"tags":        []string{"Events"},
+				"summary":     "Create event",
+				"security":    bearerSecurity(),
+				"requestBody": jsonBody(refSchema("EventRequest")),
+				"responses": responseMap(
+					response("201", "Created event", refSchema("Event")),
+					errorResponse("400"),
+					errorResponse("401"),
+				),
+			},
+		},
+		"/events/{id}": map[string]any{
+			"get": map[string]any{
+				"tags":       []string{"Events"},
+				"summary":    "Get event",
+				"security":   bearerSecurity(),
+				"parameters": []any{pathUUIDParameter("id")},
+				"responses": responseMap(
+					response("200", "Event", refSchema("Event")),
+					errorResponse("400"),
+					errorResponse("401"),
+					errorResponse("404"),
+				),
+			},
+			"patch": map[string]any{
+				"tags":        []string{"Events"},
+				"summary":     "Update event",
+				"security":    bearerSecurity(),
+				"parameters":  []any{pathUUIDParameter("id")},
+				"requestBody": jsonBody(refSchema("EventRequest")),
+				"responses": responseMap(
+					response("200", "Updated event", refSchema("Event")),
+					errorResponse("400"),
+					errorResponse("401"),
+					errorResponse("404"),
+				),
+			},
+			"delete": map[string]any{
+				"tags":       []string{"Events"},
+				"summary":    "Delete event",
+				"security":   bearerSecurity(),
+				"parameters": []any{pathUUIDParameter("id")},
+				"responses": responseMap(
+					noContentResponse("204", "Deleted"),
+					errorResponse("400"),
+					errorResponse("401"),
+					errorResponse("404"),
+				),
+			},
+		},
 	}
 }
 
@@ -321,6 +407,25 @@ func integerSchema(example int) map[string]any {
 		"type":    "integer",
 		"example": example,
 	}
+}
+
+func numberSchema(example float64) map[string]any {
+	return map[string]any{
+		"type":    "number",
+		"example": example,
+	}
+}
+
+func nullableStringSchema(example string) map[string]any {
+	schema := stringSchema(example)
+	schema["nullable"] = true
+	return schema
+}
+
+func nullableDateTimeSchema() map[string]any {
+	schema := dateTimeSchema()
+	schema["nullable"] = true
+	return schema
 }
 
 func uuidSchema() map[string]any {

@@ -13,6 +13,7 @@ func New(cfg config.Config, db *sql.DB) *http.Server {
 	mux := http.NewServeMux()
 	authHandler := handlers.NewAuth(db, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	scheduleHandler := handlers.NewSchedules(db)
+	eventHandler := handlers.NewEvents(db)
 
 	mux.HandleFunc("GET /healthz", handlers.Health)
 	mux.HandleFunc("GET /swagger", handlers.SwaggerUI)
@@ -36,6 +37,11 @@ func New(cfg config.Config, db *sql.DB) *http.Server {
 	mux.HandleFunc("GET /schedules/{id}", scheduleHandler.Get)
 	mux.HandleFunc("PATCH /schedules/{id}", scheduleHandler.Update)
 	mux.HandleFunc("DELETE /schedules/{id}", scheduleHandler.Delete)
+	mux.HandleFunc("GET /events", eventHandler.List)
+	mux.HandleFunc("POST /events", eventHandler.Create)
+	mux.HandleFunc("GET /events/{id}", eventHandler.Get)
+	mux.HandleFunc("PATCH /events/{id}", eventHandler.Update)
+	mux.HandleFunc("DELETE /events/{id}", eventHandler.Delete)
 
 	return &http.Server{
 		Addr:              ":" + cfg.HTTPPort,

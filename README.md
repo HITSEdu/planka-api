@@ -73,6 +73,16 @@ All schedule endpoints require `Authorization: Bearer <access_token>`.
 - `PATCH /schedules/{id}` with `{ "title": "Updated title" }`
 - `DELETE /schedules/{id}`
 
+## Event endpoints
+
+All event endpoints require `Authorization: Bearer <access_token>`.
+
+- `GET /events`
+- `POST /events` with `{ "title": "Planning", "description": "Sprint planning", "starts_at": "2026-06-16T09:00:00Z", "ends_at": "2026-06-16T10:00:00Z", "focus": 1 }`
+- `GET /events/{id}`
+- `PATCH /events/{id}` with the same body as create
+- `DELETE /events/{id}`
+
 ## Event data model
 
 The event schema from the diagram is implemented in `migrations/003_event_model.sql`.

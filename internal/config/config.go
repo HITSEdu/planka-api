@@ -45,7 +45,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	databaseURL := stringFromEnv("DATABASE_URL", "postgres://plankauser:postgres@planka-yungoleg.db-msk0.amvera.tech:5432/plankaapi?sslmode=disable")
+	databaseURL := buildDatabaseURL()
 
 	return Config{
 		AppEnv:           stringFromEnv("APP_ENV", "development"),
@@ -66,12 +66,30 @@ func Load() (Config, error) {
 	}, nil
 }
 
+func buildDatabaseURL() string {
+	dbURL := stringFromEnv("DATABASE_URL", "")
+	if dbURL != "" {
+		return dbURL
+	}
+
+	dbHost := stringFromEnv("DB_HOST", "planka-yungoleg.db-msk0.amvera.tech")
+	dbPort := stringFromEnv("DB_PORT", "5432")
+	dbUser := stringFromEnv("POSTGRES_USER", "plankauser")
+	dbPassword := stringFromEnv("POSTGRES_PASSWORD", "postgres")
+	dbName := stringFromEnv("POSTGRES_DB", "plankaapi")
+	dbSSL := stringFromEnv("DB_SSLMODE", "disable")
+
+	return fmt.Sprintf(
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		dbUser, dbPassword, dbHost, dbPort, dbName, dbSSL,
+	)
+}
+
 func stringFromEnv(key, fallback string) string {
 	value := os.Getenv(key)
 	if value == "" {
 		return fallback
 	}
-
 	return value
 }
 

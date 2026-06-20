@@ -1,9 +1,14 @@
 meta:
   environment: docker
-  toolchain: docker
+  toolchain:
+    name: docker
+    version: latest
 build:
   dockerfile: Dockerfile
   skip: false
 run:
   persistenceMount: /data
-  containerPort: "80"
+  image: null
+  command: null
+  args: null
+  containerPort: 8000

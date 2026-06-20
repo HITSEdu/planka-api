@@ -19,34 +19,39 @@ func NewEvents(db *sql.DB) *Events {
 }
 
 type eventResponse struct {
-	ID           string        `json:"id"`
-	Title        string        `json:"title"`
-	Description  *string       `json:"description"`
-	StartsAt     *time.Time    `json:"starts_at"`
-	EndsAt       *time.Time    `json:"ends_at"`
-	Focus        float64       `json:"focus"`
-	AccessStatus string        `json:"access_status"`
-	Tags         []tagResponse `json:"tags"`
-	CreatedAt    time.Time     `json:"created_at"`
-	UpdatedAt    time.Time     `json:"updated_at"`
+	ID            string        `json:"id"`
+	Title         string        `json:"title"`
+	Description   *string       `json:"description"`
+	StartsAt      *time.Time    `json:"starts_at"`
+	EndsAt        *time.Time    `json:"ends_at"`
+	Focus         float64       `json:"focus"`
+	AccessStatus  string        `json:"access_status"`
+	SharedUserIDs []string      `json:"shared_user_ids"`
+	Tags          []tagResponse `json:"tags"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
 type eventRequest struct {
-	Title       string     `json:"title"`
-	Description *string    `json:"description"`
-	StartsAt    *time.Time `json:"starts_at"`
-	EndsAt      *time.Time `json:"ends_at"`
-	Focus       float64    `json:"focus"`
-	TagIDs      []string   `json:"tag_ids"`
+	Title         string     `json:"title"`
+	Description   *string    `json:"description"`
+	StartsAt      *time.Time `json:"starts_at"`
+	EndsAt        *time.Time `json:"ends_at"`
+	Focus         float64    `json:"focus"`
+	AccessStatus  string     `json:"access_status"`
+	TagIDs        []string   `json:"tag_ids"`
+	SharedUserIDs []string   `json:"shared_user_ids"`
 }
 
 type normalizedEventRequest struct {
-	Title       string
-	Description *string
-	StartsAt    *time.Time
-	EndsAt      *time.Time
-	Focus       float64
-	TagIDs      []string
+	Title         string
+	Description   *string
+	StartsAt      *time.Time
+	EndsAt        *time.Time
+	Focus         float64
+	AccessStatus  string
+	TagIDs        []string
+	SharedUserIDs []string
 }
 
 type eventTagFilter struct {
@@ -62,7 +67,14 @@ type eventTagQueryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
+type eventQueryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 var errEventTagNotFound = errors.New("event tag not found")
+var errEventSharedUserNotFriend = errors.New("event shared user is not an accepted friend")
+var errEventSharedUsersRequired = errors.New("event shared users are required")
 
 func (e *Events) List(w http.ResponseWriter, r *http.Request) {
 	user, ok := currentUserFromAccessToken(e.db, w, r)
@@ -127,6 +139,10 @@ func (e *Events) List(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not read event tags")
 			return
 		}
+		if err := loadEventSharedUserIDs(r.Context(), e.db, &event); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not read event sharing")
+			return
+		}
 		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
@@ -155,43 +171,67 @@ func (e *Events) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rollback(tx)
 
-	event, err := scanEvent(tx.QueryRowContext(
+	var eventID string
+	err = tx.QueryRowContext(
 		r.Context(),
-		`WITH created_event AS (
-			 INSERT INTO events (title, description, starts_at, ends_at, focus)
-			 VALUES ($1, $2, $3, $4, $5)
-			 RETURNING id, title, description, starts_at, ends_at, focus, created_at, updated_at
-		 ), created_access AS (
-			 INSERT INTO event_accesses (event_id, owner_id)
-			 SELECT id, $6 FROM created_event
-			 RETURNING event_id, status
-		 )
-		 SELECT ce.id::text, ce.title, ce.description, ce.starts_at, ce.ends_at, ce.focus,
-		        ca.status::text, ce.created_at, ce.updated_at
-		 FROM created_event ce
-		 JOIN created_access ca ON ca.event_id = ce.id`,
+		`INSERT INTO events (title, description, starts_at, ends_at, focus)
+		 VALUES ($1, $2, $3, $4, $5)
+		 RETURNING id::text`,
 		req.Title,
 		req.Description,
 		req.StartsAt,
 		req.EndsAt,
 		req.Focus,
-		user.ID,
-	))
+	).Scan(&eventID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create event")
 		return
 	}
-	if err := replaceEventTags(r.Context(), tx, user.ID, event.ID, req.TagIDs); errors.Is(err, errEventTagNotFound) {
+
+	var accessID string
+	err = tx.QueryRowContext(
+		r.Context(),
+		`INSERT INTO event_accesses (event_id, owner_id, status)
+		 VALUES ($1, $2, $3)
+		 RETURNING id::text`,
+		eventID,
+		user.ID,
+		req.AccessStatus,
+	).Scan(&accessID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not create event access")
+		return
+	}
+
+	if err := replaceEventTags(r.Context(), tx, user.ID, eventID, req.TagIDs); errors.Is(err, errEventTagNotFound) {
 		writeError(w, http.StatusBadRequest, "all tag_ids must belong to current user")
 		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not set event tags")
 		return
 	}
-	if err := loadEventTags(r.Context(), tx, &event); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read event tags")
+
+	if err := replaceEventSharedUsers(r.Context(), tx, user.ID, accessID, req.AccessStatus, req.SharedUserIDs); errors.Is(err, errEventSharedUsersRequired) {
+		writeError(w, http.StatusBadRequest, "shared_user_ids are required for shared events")
+		return
+	} else if errors.Is(err, errEventSharedUserNotFriend) {
+		writeError(w, http.StatusBadRequest, "all shared_user_ids must be accepted friends")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not set event sharing")
 		return
 	}
+
+	event, err := loadOwnedEvent(r.Context(), tx, user.ID, eventID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "event not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load created event")
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not commit event creation")
 		return
@@ -242,29 +282,17 @@ func (e *Events) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rollback(tx)
 
-	event, err := scanEvent(tx.QueryRowContext(
+	var accessID string
+	err = tx.QueryRowContext(
 		r.Context(),
-		`UPDATE events e
-		 SET title = $1,
-		     description = $2,
-		     starts_at = $3,
-		     ends_at = $4,
-		     focus = $5,
-		     updated_at = now()
-		 FROM event_accesses a
-		 WHERE e.id = $6
-		   AND a.event_id = e.id
-		   AND a.owner_id = $7
-		 RETURNING e.id::text, e.title, e.description, e.starts_at, e.ends_at, e.focus,
-		           a.status::text, e.created_at, e.updated_at`,
-		req.Title,
-		req.Description,
-		req.StartsAt,
-		req.EndsAt,
-		req.Focus,
+		`SELECT id::text
+		 FROM event_accesses
+		 WHERE event_id = $1
+		   AND owner_id = $2
+		 FOR UPDATE`,
 		eventID,
 		user.ID,
-	))
+	).Scan(&accessID)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "event not found")
 		return
@@ -273,17 +301,82 @@ func (e *Events) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not update event")
 		return
 	}
-	if err := replaceEventTags(r.Context(), tx, user.ID, event.ID, req.TagIDs); errors.Is(err, errEventTagNotFound) {
+
+	result, err := tx.ExecContext(
+		r.Context(),
+		`UPDATE events
+		 SET title = $1,
+		     description = $2,
+		     starts_at = $3,
+		     ends_at = $4,
+		     focus = $5,
+		     updated_at = now()
+		 WHERE id = $6`,
+		req.Title,
+		req.Description,
+		req.StartsAt,
+		req.EndsAt,
+		req.Focus,
+		eventID,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update event")
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update event")
+		return
+	}
+	if rowsAffected == 0 {
+		writeError(w, http.StatusNotFound, "event not found")
+		return
+	}
+
+	_, err = tx.ExecContext(
+		r.Context(),
+		`UPDATE event_accesses
+		 SET status = $1,
+		     updated_at = now()
+		 WHERE id = $2`,
+		req.AccessStatus,
+		accessID,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update event")
+		return
+	}
+
+	if err := replaceEventTags(r.Context(), tx, user.ID, eventID, req.TagIDs); errors.Is(err, errEventTagNotFound) {
 		writeError(w, http.StatusBadRequest, "all tag_ids must belong to current user")
 		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not set event tags")
 		return
 	}
-	if err := loadEventTags(r.Context(), tx, &event); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read event tags")
+
+	if err := replaceEventSharedUsers(r.Context(), tx, user.ID, accessID, req.AccessStatus, req.SharedUserIDs); errors.Is(err, errEventSharedUsersRequired) {
+		writeError(w, http.StatusBadRequest, "shared_user_ids are required for shared events")
+		return
+	} else if errors.Is(err, errEventSharedUserNotFriend) {
+		writeError(w, http.StatusBadRequest, "all shared_user_ids must be accepted friends")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not set event sharing")
 		return
 	}
+
+	event, err := loadOwnedEvent(r.Context(), tx, user.ID, eventID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "event not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load updated event")
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not commit event update")
 		return
@@ -332,13 +425,7 @@ func (e *Events) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (e *Events) findOwnedEvent(w http.ResponseWriter, r *http.Request, userID, eventID string) (eventResponse, bool) {
-	event, err := scanEvent(e.db.QueryRowContext(
-		r.Context(),
-		eventSelectSQL+`
-		 WHERE e.id = $1 AND a.owner_id = $2`,
-		eventID,
-		userID,
-	))
+	event, err := loadOwnedEvent(r.Context(), e.db, userID, eventID)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "event not found")
 		return eventResponse{}, false
@@ -347,11 +434,6 @@ func (e *Events) findOwnedEvent(w http.ResponseWriter, r *http.Request, userID, 
 		writeError(w, http.StatusInternalServerError, "could not load event")
 		return eventResponse{}, false
 	}
-	if err := e.loadTagsForEvent(r.Context(), &event); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read event tags")
-		return eventResponse{}, false
-	}
-
 	return event, true
 }
 
@@ -389,13 +471,36 @@ func decodeEventRequest(w http.ResponseWriter, r *http.Request) (normalizedEvent
 		}
 	}
 
+	accessStatus := strings.TrimSpace(req.AccessStatus)
+	if accessStatus == "" {
+		accessStatus = "PRIVATE"
+	}
+	if accessStatus != "PRIVATE" && accessStatus != "PUBLIC" && accessStatus != "SHARED" {
+		writeError(w, http.StatusBadRequest, "valid access_status is required")
+		return normalizedEventRequest{}, false
+	}
+
+	sharedUserIDs := uniqueStrings(req.SharedUserIDs)
+	for _, sharedUserID := range sharedUserIDs {
+		if !isUUID(sharedUserID) {
+			writeError(w, http.StatusBadRequest, "valid shared_user_ids are required")
+			return normalizedEventRequest{}, false
+		}
+	}
+	if accessStatus == "SHARED" && len(sharedUserIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "shared_user_ids are required for shared events")
+		return normalizedEventRequest{}, false
+	}
+
 	return normalizedEventRequest{
-		Title:       title,
-		Description: trimOptionalString(req.Description),
-		StartsAt:    req.StartsAt,
-		EndsAt:      req.EndsAt,
-		Focus:       req.Focus,
-		TagIDs:      tagIDs,
+		Title:         title,
+		Description:   trimOptionalString(req.Description),
+		StartsAt:      req.StartsAt,
+		EndsAt:        req.EndsAt,
+		Focus:         req.Focus,
+		AccessStatus:  accessStatus,
+		TagIDs:        tagIDs,
+		SharedUserIDs: sharedUserIDs,
 	}, true
 }
 
@@ -431,6 +536,62 @@ func replaceEventTags(ctx context.Context, tx *sql.Tx, userID, eventID string, t
 	return nil
 }
 
+func replaceEventSharedUsers(ctx context.Context, tx *sql.Tx, userID, eventAccessID, accessStatus string, sharedUserIDs []string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM event_access_allowed_users WHERE event_access_id = $1`, eventAccessID); err != nil {
+		return err
+	}
+
+	if accessStatus != "SHARED" {
+		return nil
+	}
+
+	normalizedSharedUserIDs := make([]string, 0, len(sharedUserIDs))
+	for _, sharedUserID := range sharedUserIDs {
+		if sharedUserID == userID {
+			continue
+		}
+		normalizedSharedUserIDs = append(normalizedSharedUserIDs, sharedUserID)
+	}
+	if len(normalizedSharedUserIDs) == 0 {
+		return errEventSharedUsersRequired
+	}
+
+	for _, sharedUserID := range normalizedSharedUserIDs {
+		result, err := tx.ExecContext(
+			ctx,
+			`INSERT INTO event_access_allowed_users (event_access_id, user_id)
+			 SELECT $1, u.id
+			 FROM users u
+			 WHERE u.id = $2
+			   AND EXISTS (
+			       SELECT 1
+			       FROM invitations i
+			       WHERE i.status = 'ACCEPTED'
+			         AND (
+			             (i.from_user_id = $3 AND i.to_user_id = u.id)
+			             OR (i.from_user_id = u.id AND i.to_user_id = $3)
+			         )
+			   )`,
+			eventAccessID,
+			sharedUserID,
+			userID,
+		)
+		if err != nil {
+			return err
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rowsAffected == 0 {
+			return errEventSharedUserNotFriend
+		}
+	}
+
+	return nil
+}
+
 func loadEventTags(ctx context.Context, queryer eventTagQueryer, event *eventResponse) error {
 	rows, err := queryer.QueryContext(
 		ctx,
@@ -460,6 +621,58 @@ func loadEventTags(ctx context.Context, queryer eventTagQueryer, event *eventRes
 
 	event.Tags = tags
 	return nil
+}
+
+func loadEventSharedUserIDs(ctx context.Context, queryer eventTagQueryer, event *eventResponse) error {
+	rows, err := queryer.QueryContext(
+		ctx,
+		`SELECT eau.user_id::text
+		 FROM event_access_allowed_users eau
+		 JOIN event_accesses ea ON ea.id = eau.event_access_id
+		 WHERE ea.event_id = $1
+		 ORDER BY eau.created_at`,
+		event.ID,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	sharedUserIDs := make([]string, 0)
+	for rows.Next() {
+		var sharedUserID string
+		if err := rows.Scan(&sharedUserID); err != nil {
+			return err
+		}
+		sharedUserIDs = append(sharedUserIDs, sharedUserID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	event.SharedUserIDs = sharedUserIDs
+	return nil
+}
+
+func loadOwnedEvent(ctx context.Context, queryer eventQueryer, userID, eventID string) (eventResponse, error) {
+	event, err := scanEvent(queryer.QueryRowContext(
+		ctx,
+		eventSelectSQL+`
+		 WHERE e.id = $1 AND a.owner_id = $2`,
+		eventID,
+		userID,
+	))
+	if err != nil {
+		return eventResponse{}, err
+	}
+	if err := loadEventTags(ctx, queryer, &event); err != nil {
+		return eventResponse{}, err
+	}
+	if err := loadEventSharedUserIDs(ctx, queryer, &event); err != nil {
+		return eventResponse{}, err
+	}
+
+	return event, nil
 }
 
 func uniqueStrings(values []string) []string {
@@ -543,6 +756,8 @@ func scanEvent(scanner eventScanner) (eventResponse, error) {
 		value := endsAt.Time
 		event.EndsAt = &value
 	}
+
+	event.SharedUserIDs = make([]string, 0)
 
 	return event, nil
 }

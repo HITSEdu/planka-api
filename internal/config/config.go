@@ -45,44 +45,22 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	databaseURL := buildDatabaseURL()
-
 	return Config{
 		AppEnv:           stringFromEnv("APP_ENV", "development"),
 		HTTPPort:         stringFromEnv("HTTP_PORT", "8080"),
 		HTTPReadTimeout:  readTimeout,
 		HTTPWriteTimeout: writeTimeout,
 		HTTPIdleTimeout:  idleTimeout,
-		DatabaseURL:      databaseURL,
+		DatabaseURL:      stringFromEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/planka_api?sslmode=disable"),
 		CORSOrigins: csvFromEnv("CORS_ORIGINS", []string{
 			"http://localhost:3000",
 			"http://localhost:5173",
 			"http://127.0.0.1:3000",
 			"http://127.0.0.1:5173",
-			"https://planka-web.vercel.app/",
 		}),
 		AccessTokenTTL:  accessTokenTTL,
 		RefreshTokenTTL: refreshTokenTTL,
 	}, nil
-}
-
-func buildDatabaseURL() string {
-	dbURL := stringFromEnv("DATABASE_URL", "")
-	if dbURL != "" {
-		return dbURL
-	}
-
-	dbHost := stringFromEnv("DB_HOST", "planka-yungoleg.db-msk0.amvera.tech")
-	dbPort := stringFromEnv("DB_PORT", "5432")
-	dbUser := stringFromEnv("POSTGRES_USER", "plankauser")
-	dbPassword := stringFromEnv("POSTGRES_PASSWORD", "postgres")
-	dbName := stringFromEnv("POSTGRES_DB", "plankaapi")
-	dbSSL := stringFromEnv("DB_SSLMODE", "disable")
-
-	return fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
-		dbUser, dbPassword, dbHost, dbPort, dbName, dbSSL,
-	)
 }
 
 func stringFromEnv(key, fallback string) string {
@@ -90,6 +68,7 @@ func stringFromEnv(key, fallback string) string {
 	if value == "" {
 		return fallback
 	}
+
 	return value
 }
 

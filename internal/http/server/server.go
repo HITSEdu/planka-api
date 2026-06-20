@@ -32,6 +32,7 @@ func New(cfg config.Config, db *sql.DB) *http.Server {
 	mux.HandleFunc("POST /api/Auth/logout", authHandler.APILogout)
 	mux.HandleFunc("POST /api/Auth/revoke_all", authHandler.APIRevokeAll)
 	mux.HandleFunc("GET /api/Profile", authHandler.APIProfile)
+	mux.HandleFunc("PATCH /api/Profile", authHandler.APIUpdateProfile)
 	mux.HandleFunc("POST /oauth/token", authHandler.Token)
 	mux.HandleFunc("POST /oauth/revoke", authHandler.Revoke)
 	mux.HandleFunc("GET /schedules", scheduleHandler.List)

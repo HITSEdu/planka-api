@@ -9,6 +9,7 @@ psql "$DATABASE_URL" -f migrations/001_auth.sql
 psql "$DATABASE_URL" -f migrations/002_schedules.sql
 psql "$DATABASE_URL" -f migrations/003_event_model.sql
 psql "$DATABASE_URL" -f migrations/004_user_tags.sql
+psql "$DATABASE_URL" -f migrations/005_user_profile.sql
 ```
 
 With Docker Compose the schema is applied automatically when the Postgres volume is created:
@@ -17,6 +18,12 @@ With Docker Compose the schema is applied automatically when the Postgres volume
 cp .env.example .env
 # set POSTGRES_PASSWORD in .env before starting
 docker compose up --build
+```
+
+For an existing Docker Compose database volume, apply newly added migrations manually, for example:
+
+```sh
+docker compose exec -T postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /docker-entrypoint-initdb.d/005_user_profile.sql'
 ```
 
 ## Swagger
@@ -49,6 +56,8 @@ Planka-compatible endpoints:
   returns `204 No Content`
 - `GET /api/Profile` with `Authorization: Bearer <accessToken>`
   returns current user profile
+- `PATCH /api/Profile` with `Authorization: Bearer <accessToken>` and `{ "firstName": "Ivan", "lastName": "Ivanov", "patronymic": "Ivanovich", "birthDate": "2000-01-31", "gender": "Male", "avatarUrl": "https://example.com/avatar.jpg" }`
+  updates current user profile
 
 Existing endpoints:
 

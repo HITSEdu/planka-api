@@ -21,6 +21,8 @@ const (
 	passwordKeyBytes  = 32
 	passwordRounds    = 210000
 	tokenBytes        = 32
+	maxProfileTextLen = 120
+	maxAvatarValueLen = 1000000
 )
 
 type Auth struct {
@@ -108,6 +110,16 @@ type apiProfileResponse struct {
 	Patronymic *string `json:"patronymic"`
 	BirthDate  string  `json:"birthDate"`
 	Gender     string  `json:"gender"`
+	AvatarURL  *string `json:"avatarUrl"`
+}
+
+type apiProfileUpdateRequest struct {
+	LastName   *string `json:"lastName"`
+	FirstName  *string `json:"firstName"`
+	Patronymic *string `json:"patronymic"`
+	BirthDate  string  `json:"birthDate"`
+	Gender     string  `json:"gender"`
+	AvatarURL  *string `json:"avatarUrl"`
 }
 
 func (a *Auth) Register(w http.ResponseWriter, r *http.Request) {
@@ -502,18 +514,245 @@ func (a *Auth) APIProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var firstName *string
-	if user.Name != "" {
-		firstName = &user.Name
+	profile, err := a.profileByUserID(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load profile")
+		return
 	}
 
-	writeJSON(w, http.StatusOK, apiProfileResponse{
-		ID:        user.ID,
-		Email:     user.Email,
-		FirstName: firstName,
-		BirthDate: "",
-		Gender:    "NotDefined",
+	writeJSON(w, http.StatusOK, profile)
+}
+
+func (a *Auth) APIUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	user, ok := a.userFromAccessToken(w, r)
+	if !ok {
+		return
+	}
+
+	var req apiProfileUpdateRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	firstName, ok := profileTextFromRequest(w, req.FirstName, "firstName")
+	if !ok {
+		return
+	}
+	lastName, ok := profileTextFromRequest(w, req.LastName, "lastName")
+	if !ok {
+		return
+	}
+	patronymic, ok := profileTextFromRequest(w, req.Patronymic, "patronymic")
+	if !ok {
+		return
+	}
+	avatarURL, ok := avatarURLFromRequest(w, req.AvatarURL)
+	if !ok {
+		return
+	}
+	birthDate, ok := birthDateFromRequest(w, req.BirthDate)
+	if !ok {
+		return
+	}
+
+	gender := strings.TrimSpace(req.Gender)
+	if gender == "" {
+		gender = "NotDefined"
+	}
+	if gender != "Male" && gender != "Female" && gender != "NotDefined" {
+		writeError(w, http.StatusBadRequest, "gender must be Male, Female or NotDefined")
+		return
+	}
+
+	profile, err := a.updateProfile(r.Context(), user.ID, profileUpdate{
+		FirstName:  firstName,
+		LastName:   lastName,
+		Patronymic: patronymic,
+		BirthDate:  birthDate,
+		Gender:     gender,
+		AvatarURL:  avatarURL,
 	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update profile")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, profile)
+}
+
+type profileUpdate struct {
+	FirstName  *string
+	LastName   *string
+	Patronymic *string
+	BirthDate  *time.Time
+	Gender     string
+	AvatarURL  *string
+}
+
+func (a *Auth) profileByUserID(ctx context.Context, userID string) (apiProfileResponse, error) {
+	return scanAPIProfile(a.db.QueryRowContext(
+		ctx,
+		`SELECT id::text,
+		        email,
+		        NULLIF(last_name, ''),
+		        COALESCE(NULLIF(first_name, ''), NULLIF(name, '')),
+		        NULLIF(patronymic, ''),
+		        COALESCE(to_char(birth_date, 'YYYY-MM-DD'), ''),
+		        COALESCE(NULLIF(gender, ''), 'NotDefined'),
+		        NULLIF(avatar_url, '')
+		 FROM users
+		 WHERE id = $1`,
+		userID,
+	))
+}
+
+func (a *Auth) updateProfile(ctx context.Context, userID string, update profileUpdate) (apiProfileResponse, error) {
+	return scanAPIProfile(a.db.QueryRowContext(
+		ctx,
+		`UPDATE users
+		 SET first_name = $1,
+		     last_name = $2,
+		     patronymic = $3,
+		     birth_date = $4::date,
+		     gender = $5,
+		     avatar_url = $6,
+		     name = NULLIF(concat_ws(' ', $2::text, $1::text, $3::text), ''),
+		     updated_at = now()
+		 WHERE id = $7
+		 RETURNING id::text,
+		           email,
+		           NULLIF(last_name, ''),
+		           NULLIF(first_name, ''),
+		           NULLIF(patronymic, ''),
+		           COALESCE(to_char(birth_date, 'YYYY-MM-DD'), ''),
+		           COALESCE(NULLIF(gender, ''), 'NotDefined'),
+		           NULLIF(avatar_url, '')`,
+		nullableStringArg(update.FirstName),
+		nullableStringArg(update.LastName),
+		nullableStringArg(update.Patronymic),
+		nullableDateArg(update.BirthDate),
+		update.Gender,
+		nullableStringArg(update.AvatarURL),
+		userID,
+	))
+}
+
+type profileScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanAPIProfile(scanner profileScanner) (apiProfileResponse, error) {
+	var profile apiProfileResponse
+	var lastName sql.NullString
+	var firstName sql.NullString
+	var patronymic sql.NullString
+	var avatarURL sql.NullString
+
+	err := scanner.Scan(
+		&profile.ID,
+		&profile.Email,
+		&lastName,
+		&firstName,
+		&patronymic,
+		&profile.BirthDate,
+		&profile.Gender,
+		&avatarURL,
+	)
+	if err != nil {
+		return apiProfileResponse{}, err
+	}
+
+	profile.LastName = stringPtrFromNull(lastName)
+	profile.FirstName = stringPtrFromNull(firstName)
+	profile.Patronymic = stringPtrFromNull(patronymic)
+	profile.AvatarURL = stringPtrFromNull(avatarURL)
+
+	return profile, nil
+}
+
+func profileTextFromRequest(w http.ResponseWriter, value *string, field string) (*string, bool) {
+	if value == nil {
+		return nil, true
+	}
+
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil, true
+	}
+	if len(trimmed) > maxProfileTextLen {
+		writeError(w, http.StatusBadRequest, field+" is too long")
+		return nil, false
+	}
+
+	return &trimmed, true
+}
+
+func avatarURLFromRequest(w http.ResponseWriter, value *string) (*string, bool) {
+	if value == nil {
+		return nil, true
+	}
+
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil, true
+	}
+	if len(trimmed) > maxAvatarValueLen {
+		writeError(w, http.StatusBadRequest, "avatarUrl is too long")
+		return nil, false
+	}
+	if !strings.HasPrefix(trimmed, "https://") &&
+		!strings.HasPrefix(trimmed, "http://") &&
+		!strings.HasPrefix(trimmed, "data:image/png") &&
+		!strings.HasPrefix(trimmed, "data:image/jpeg") &&
+		!strings.HasPrefix(trimmed, "data:image/jpg") &&
+		!strings.HasPrefix(trimmed, "data:image/webp") &&
+		!strings.HasPrefix(trimmed, "data:image/gif") &&
+		!strings.HasPrefix(trimmed, "/") {
+		writeError(w, http.StatusBadRequest, "avatarUrl must be an image URL or data image")
+		return nil, false
+	}
+
+	return &trimmed, true
+}
+
+func birthDateFromRequest(w http.ResponseWriter, value string) (*time.Time, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil, true
+	}
+
+	date, err := time.Parse("2006-01-02", trimmed)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "birthDate must use YYYY-MM-DD format")
+		return nil, false
+	}
+
+	return &date, true
+}
+
+func nullableStringArg(value *string) any {
+	if value == nil {
+		return nil
+	}
+
+	return *value
+}
+
+func nullableDateArg(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+
+	return value.Format("2006-01-02")
+}
+
+func stringPtrFromNull(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+
+	inner := value.String
+	return &inner
 }
 
 func (a *Auth) userFromAccessToken(w http.ResponseWriter, r *http.Request) (userResponse, bool) {

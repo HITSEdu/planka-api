@@ -89,6 +89,30 @@ func openAPISpec() map[string]any {
 						"created_at": dateTimeSchema(),
 					},
 				},
+				"Profile": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":         uuidSchema(),
+						"email":      stringSchema("user@example.com"),
+						"lastName":   nullableStringSchema("Ivanov"),
+						"firstName":  nullableStringSchema("Ivan"),
+						"patronymic": nullableStringSchema("Ivanovich"),
+						"birthDate":  dateSchema("2000-01-31"),
+						"gender":     genderSchema(),
+						"avatarUrl":  nullableStringSchema("https://example.com/avatar.jpg"),
+					},
+				},
+				"ProfileUpdateRequest": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"lastName":   nullableStringSchema("Ivanov"),
+						"firstName":  nullableStringSchema("Ivan"),
+						"patronymic": nullableStringSchema("Ivanovich"),
+						"birthDate":  dateSchema("2000-01-31"),
+						"gender":     genderSchema(),
+						"avatarUrl":  nullableStringSchema("https://example.com/avatar.jpg"),
+					},
+				},
 				"ScheduleRequest": map[string]any{
 					"type":     "object",
 					"required": []string{"title"},
@@ -203,6 +227,28 @@ func pathsSpec() map[string]any {
 				"security": bearerSecurity(),
 				"responses": responseMap(
 					response("200", "Current user", refSchema("User")),
+					errorResponse("401"),
+				),
+			},
+		},
+		"/api/Profile": map[string]any{
+			"get": map[string]any{
+				"tags":     []string{"Profile"},
+				"summary":  "Current profile",
+				"security": bearerSecurity(),
+				"responses": responseMap(
+					response("200", "Current profile", refSchema("Profile")),
+					errorResponse("401"),
+				),
+			},
+			"patch": map[string]any{
+				"tags":        []string{"Profile"},
+				"summary":     "Update profile",
+				"security":    bearerSecurity(),
+				"requestBody": jsonBody(refSchema("ProfileUpdateRequest")),
+				"responses": responseMap(
+					response("200", "Updated profile", refSchema("Profile")),
+					errorResponse("400"),
 					errorResponse("401"),
 				),
 			},
@@ -511,6 +557,22 @@ func nullableDateTimeSchema() map[string]any {
 	schema := dateTimeSchema()
 	schema["nullable"] = true
 	return schema
+}
+
+func dateSchema(example string) map[string]any {
+	return map[string]any{
+		"type":    "string",
+		"format":  "date",
+		"example": example,
+	}
+}
+
+func genderSchema() map[string]any {
+	return map[string]any{
+		"type":    "string",
+		"enum":    []string{"Male", "Female", "NotDefined"},
+		"example": "NotDefined",
+	}
 }
 
 func uuidSchema() map[string]any {

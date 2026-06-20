@@ -18,15 +18,17 @@ func NewFriends(db *sql.DB) *Friends {
 }
 
 type friendUserResponse struct {
-	ID    string  `json:"id"`
-	Email string  `json:"email"`
-	Name  *string `json:"name"`
+	ID        string  `json:"id"`
+	Email     string  `json:"email"`
+	Name      *string `json:"name"`
+	AvatarURL *string `json:"avatar_url"`
 }
 
 type friendResponse struct {
 	ID                string  `json:"id"`
 	Email             string  `json:"email"`
 	Name              *string `json:"name"`
+	AvatarURL         *string `json:"avatar_url"`
 	SharedEventsCount int     `json:"shared_events_count"`
 }
 
@@ -182,6 +184,7 @@ func (f *Friends) AcceptRequest(w http.ResponseWriter, r *http.Request) {
 		 RETURNING u.id::text,
 		           u.email,
 		           NULLIF(u.name, ''),
+		           NULLIF(u.avatar_url, ''),
 		           (
 		               SELECT COUNT(*)::int
 		               FROM event_accesses ea
@@ -400,14 +403,15 @@ func (f *Friends) ListSharedEvents(w http.ResponseWriter, r *http.Request) {
 func findUserByEmail(ctx context.Context, db *sql.DB, email string) (friendUserResponse, bool, error) {
 	var user friendUserResponse
 	var name sql.NullString
+	var avatarURL sql.NullString
 
 	err := db.QueryRowContext(
 		ctx,
-		`SELECT id::text, email, NULLIF(name, '')
+		`SELECT id::text, email, NULLIF(name, ''), NULLIF(avatar_url, '')
 		 FROM users
 		 WHERE email = $1`,
 		email,
-	).Scan(&user.ID, &user.Email, &name)
+	).Scan(&user.ID, &user.Email, &name, &avatarURL)
 	if errors.Is(err, sql.ErrNoRows) {
 		return friendUserResponse{}, false, nil
 	}
@@ -418,6 +422,10 @@ func findUserByEmail(ctx context.Context, db *sql.DB, email string) (friendUserR
 	if name.Valid {
 		value := name.String
 		user.Name = &value
+	}
+	if avatarURL.Valid {
+		value := avatarURL.String
+		user.AvatarURL = &value
 	}
 
 	return user, true, nil
@@ -458,6 +466,7 @@ func listFriends(ctx context.Context, db *sql.DB, userID string) ([]friendRespon
 		`SELECT u.id::text,
 		        u.email,
 		        NULLIF(u.name, ''),
+		        NULLIF(u.avatar_url, ''),
 		        (
 		            SELECT COUNT(*)::int
 		            FROM event_accesses ea
@@ -500,7 +509,7 @@ func listIncomingFriendRequests(ctx context.Context, db *sql.DB, userID string) 
 	return listFriendRequests(
 		ctx,
 		db,
-		`SELECT i.id::text, u.id::text, u.email, NULLIF(u.name, ''), i.created_at
+		`SELECT i.id::text, u.id::text, u.email, NULLIF(u.name, ''), NULLIF(u.avatar_url, ''), i.created_at
 		 FROM invitations i
 		 JOIN users u ON u.id = i.from_user_id
 		 WHERE i.to_user_id = $1
@@ -514,7 +523,7 @@ func listOutgoingFriendRequests(ctx context.Context, db *sql.DB, userID string) 
 	return listFriendRequests(
 		ctx,
 		db,
-		`SELECT i.id::text, u.id::text, u.email, NULLIF(u.name, ''), i.created_at
+		`SELECT i.id::text, u.id::text, u.email, NULLIF(u.name, ''), NULLIF(u.avatar_url, ''), i.created_at
 		 FROM invitations i
 		 JOIN users u ON u.id = i.to_user_id
 		 WHERE i.from_user_id = $1
@@ -631,8 +640,9 @@ type friendScanner interface {
 func scanFriend(scanner friendScanner) (friendResponse, error) {
 	var friend friendResponse
 	var name sql.NullString
+	var avatarURL sql.NullString
 
-	err := scanner.Scan(&friend.ID, &friend.Email, &name, &friend.SharedEventsCount)
+	err := scanner.Scan(&friend.ID, &friend.Email, &name, &avatarURL, &friend.SharedEventsCount)
 	if err != nil {
 		return friendResponse{}, err
 	}
@@ -641,6 +651,10 @@ func scanFriend(scanner friendScanner) (friendResponse, error) {
 		value := name.String
 		friend.Name = &value
 	}
+	if avatarURL.Valid {
+		value := avatarURL.String
+		friend.AvatarURL = &value
+	}
 
 	return friend, nil
 }
@@ -648,12 +662,14 @@ func scanFriend(scanner friendScanner) (friendResponse, error) {
 func scanFriendInvitation(scanner friendScanner) (friendInvitationResponse, error) {
 	var invitation friendInvitationResponse
 	var name sql.NullString
+	var avatarURL sql.NullString
 
 	err := scanner.Scan(
 		&invitation.ID,
 		&invitation.User.ID,
 		&invitation.User.Email,
 		&name,
+		&avatarURL,
 		&invitation.CreatedAt,
 	)
 	if err != nil {
@@ -663,6 +679,10 @@ func scanFriendInvitation(scanner friendScanner) (friendInvitationResponse, erro
 	if name.Valid {
 		value := name.String
 		invitation.User.Name = &value
+	}
+	if avatarURL.Valid {
+		value := avatarURL.String
+		invitation.User.AvatarURL = &value
 	}
 
 	return invitation, nil

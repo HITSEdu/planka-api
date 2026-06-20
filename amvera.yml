@@ -1,20 +1,9 @@
 meta:
   environment: docker
-  toolchain:
-    name: docker-compose
-    version: latest
-
+  toolchain: docker
 build:
   dockerfile: Dockerfile
   skip: false
-
 run:
-  image: null
-  command: null
-  args: null
   persistenceMount: /data
-  containerPort: "8080"
-  compose:
-    enabled: true
-    file: docker-compose.yml
-    service: app
+  containerPort: "80"

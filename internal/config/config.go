@@ -45,13 +45,18 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	databaseURL, err := durationFromEnv("DATABASE_URL", "postgres://plankauser:postgres@amvera-yungoleg-cnpg-planka-rw:5432/plankaapi?sslmode=disable")
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		AppEnv:           stringFromEnv("APP_ENV", "development"),
 		HTTPPort:         stringFromEnv("HTTP_PORT", "8080"),
 		HTTPReadTimeout:  readTimeout,
 		HTTPWriteTimeout: writeTimeout,
 		HTTPIdleTimeout:  idleTimeout,
-		DatabaseURL:      stringFromEnv("DATABASE_URL", "postgres://plankauser:postgres@amvera-yungoleg-cnpg-planka-rw:5432/plankaapi?sslmode=disable"),
+		DatabaseURL:      databaseURL,
 		CORSOrigins: csvFromEnv("CORS_ORIGINS", []string{
 			"http://localhost:3000",
 			"http://localhost:5173",

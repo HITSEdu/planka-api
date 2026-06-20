@@ -8,6 +8,7 @@ Before starting the API, apply the schema:
 psql "$DATABASE_URL" -f migrations/001_auth.sql
 psql "$DATABASE_URL" -f migrations/002_schedules.sql
 psql "$DATABASE_URL" -f migrations/003_event_model.sql
+psql "$DATABASE_URL" -f migrations/004_user_tags.sql
 ```
 
 With Docker Compose the schema is applied automatically when the Postgres volume is created:
@@ -80,10 +81,20 @@ All event endpoints require `Authorization: Bearer <access_token>`.
 - `GET /events`
 - `GET /events?tag_id=00000000-0000-0000-0000-000000000000`
 - `GET /events?tag_name=planning`
-- `POST /events` with `{ "title": "Planning", "description": "Sprint planning", "starts_at": "2026-06-16T09:00:00Z", "ends_at": "2026-06-16T10:00:00Z", "focus": 1 }`
+- `POST /events` with `{ "title": "Planning", "description": "Sprint planning", "starts_at": "2026-06-16T09:00:00Z", "ends_at": "2026-06-16T10:00:00Z", "focus": 1, "tag_ids": ["00000000-0000-0000-0000-000000000000"] }`
 - `GET /events/{id}`
 - `PATCH /events/{id}` with the same body as create
 - `DELETE /events/{id}`
+
+## Tag endpoints
+
+All tag endpoints require `Authorization: Bearer <access_token>`.
+
+- `GET /tags`
+- `POST /tags` with `{ "name": "Planning", "color": "#91FFB5" }`
+- `GET /tags/{id}`
+- `PATCH /tags/{id}` with `{ "name": "Updated", "color": "#8A91FF" }`
+- `DELETE /tags/{id}`
 
 ## Event data model
 
@@ -92,5 +103,6 @@ It adds:
 
 - `events` with title, optional description/date range, and focus.
 - `tags` with a hex color and many-to-many `event_tags`.
+- `migrations/004_user_tags.sql` scopes tags to their owner.
 - `event_accesses` with owner, `access_status`, and `event_access_allowed_users`.
 - `invitations` with sender, recipient, and `invitation_status`.

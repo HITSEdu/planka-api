@@ -14,6 +14,7 @@ func New(cfg config.Config, db *sql.DB) *http.Server {
 	authHandler := handlers.NewAuth(db, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	scheduleHandler := handlers.NewSchedules(db)
 	eventHandler := handlers.NewEvents(db)
+	tagHandler := handlers.NewTags(db)
 
 	mux.HandleFunc("GET /healthz", handlers.Health)
 	mux.HandleFunc("GET /swagger", handlers.SwaggerUI)
@@ -42,10 +43,15 @@ func New(cfg config.Config, db *sql.DB) *http.Server {
 	mux.HandleFunc("GET /events/{id}", eventHandler.Get)
 	mux.HandleFunc("PATCH /events/{id}", eventHandler.Update)
 	mux.HandleFunc("DELETE /events/{id}", eventHandler.Delete)
+	mux.HandleFunc("GET /tags", tagHandler.List)
+	mux.HandleFunc("POST /tags", tagHandler.Create)
+	mux.HandleFunc("GET /tags/{id}", tagHandler.Get)
+	mux.HandleFunc("PATCH /tags/{id}", tagHandler.Update)
+	mux.HandleFunc("DELETE /tags/{id}", tagHandler.Delete)
 
 	return &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
-		Handler:           loggingMiddleware(corsMiddleware(cfg.CORSOrigins, mux)),
+		Handler:           loggingMiddleware(corsMiddleware(cfg.AppEnv, cfg.CORSOrigins, mux)),
 		ReadHeaderTimeout: 2 * time.Second,
 		ReadTimeout:       cfg.HTTPReadTimeout,
 		WriteTimeout:      cfg.HTTPWriteTimeout,

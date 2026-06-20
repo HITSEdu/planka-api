@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"math"
@@ -18,15 +19,16 @@ func NewEvents(db *sql.DB) *Events {
 }
 
 type eventResponse struct {
-	ID           string     `json:"id"`
-	Title        string     `json:"title"`
-	Description  *string    `json:"description"`
-	StartsAt     *time.Time `json:"starts_at"`
-	EndsAt       *time.Time `json:"ends_at"`
-	Focus        float64    `json:"focus"`
-	AccessStatus string     `json:"access_status"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID           string        `json:"id"`
+	Title        string        `json:"title"`
+	Description  *string       `json:"description"`
+	StartsAt     *time.Time    `json:"starts_at"`
+	EndsAt       *time.Time    `json:"ends_at"`
+	Focus        float64       `json:"focus"`
+	AccessStatus string        `json:"access_status"`
+	Tags         []tagResponse `json:"tags"`
+	CreatedAt    time.Time     `json:"created_at"`
+	UpdatedAt    time.Time     `json:"updated_at"`
 }
 
 type eventRequest struct {
@@ -35,6 +37,7 @@ type eventRequest struct {
 	StartsAt    *time.Time `json:"starts_at"`
 	EndsAt      *time.Time `json:"ends_at"`
 	Focus       float64    `json:"focus"`
+	TagIDs      []string   `json:"tag_ids"`
 }
 
 type normalizedEventRequest struct {
@@ -43,6 +46,7 @@ type normalizedEventRequest struct {
 	StartsAt    *time.Time
 	EndsAt      *time.Time
 	Focus       float64
+	TagIDs      []string
 }
 
 type eventTagFilter struct {
@@ -53,6 +57,12 @@ type eventTagFilter struct {
 type eventScanner interface {
 	Scan(dest ...any) error
 }
+
+type eventTagQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+var errEventTagNotFound = errors.New("event tag not found")
 
 func (e *Events) List(w http.ResponseWriter, r *http.Request) {
 	user, ok := currentUserFromAccessToken(e.db, w, r)
@@ -86,6 +96,7 @@ func (e *Events) List(w http.ResponseWriter, r *http.Request) {
 		       FROM event_tags et
 		       JOIN tags t ON t.id = et.tag_id
 		       WHERE et.event_id = e.id
+		         AND t.user_id = $1
 		         AND t.name = $2
 		   )`
 		args = append(args, tagFilter.Name)
@@ -112,6 +123,10 @@ func (e *Events) List(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "could not read events")
 			return
 		}
+		if err := e.loadTagsForEvent(r.Context(), &event); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not read event tags")
+			return
+		}
 		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
@@ -133,7 +148,14 @@ func (e *Events) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	event, err := scanEvent(e.db.QueryRowContext(
+	tx, err := e.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not start event creation")
+		return
+	}
+	defer rollback(tx)
+
+	event, err := scanEvent(tx.QueryRowContext(
 		r.Context(),
 		`WITH created_event AS (
 			 INSERT INTO events (title, description, starts_at, ends_at, focus)
@@ -157,6 +179,21 @@ func (e *Events) Create(w http.ResponseWriter, r *http.Request) {
 	))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create event")
+		return
+	}
+	if err := replaceEventTags(r.Context(), tx, user.ID, event.ID, req.TagIDs); errors.Is(err, errEventTagNotFound) {
+		writeError(w, http.StatusBadRequest, "all tag_ids must belong to current user")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not set event tags")
+		return
+	}
+	if err := loadEventTags(r.Context(), tx, &event); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read event tags")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not commit event creation")
 		return
 	}
 
@@ -198,7 +235,14 @@ func (e *Events) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	event, err := scanEvent(e.db.QueryRowContext(
+	tx, err := e.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not start event update")
+		return
+	}
+	defer rollback(tx)
+
+	event, err := scanEvent(tx.QueryRowContext(
 		r.Context(),
 		`UPDATE events e
 		 SET title = $1,
@@ -227,6 +271,21 @@ func (e *Events) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not update event")
+		return
+	}
+	if err := replaceEventTags(r.Context(), tx, user.ID, event.ID, req.TagIDs); errors.Is(err, errEventTagNotFound) {
+		writeError(w, http.StatusBadRequest, "all tag_ids must belong to current user")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not set event tags")
+		return
+	}
+	if err := loadEventTags(r.Context(), tx, &event); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read event tags")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not commit event update")
 		return
 	}
 
@@ -288,8 +347,16 @@ func (e *Events) findOwnedEvent(w http.ResponseWriter, r *http.Request, userID, 
 		writeError(w, http.StatusInternalServerError, "could not load event")
 		return eventResponse{}, false
 	}
+	if err := e.loadTagsForEvent(r.Context(), &event); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read event tags")
+		return eventResponse{}, false
+	}
 
 	return event, true
+}
+
+func (e *Events) loadTagsForEvent(ctx context.Context, event *eventResponse) error {
+	return loadEventTags(ctx, e.db, event)
 }
 
 func decodeEventRequest(w http.ResponseWriter, r *http.Request) (normalizedEventRequest, bool) {
@@ -314,13 +381,104 @@ func decodeEventRequest(w http.ResponseWriter, r *http.Request) (normalizedEvent
 		return normalizedEventRequest{}, false
 	}
 
+	tagIDs := uniqueStrings(req.TagIDs)
+	for _, tagID := range tagIDs {
+		if !isUUID(tagID) {
+			writeError(w, http.StatusBadRequest, "valid tag_ids are required")
+			return normalizedEventRequest{}, false
+		}
+	}
+
 	return normalizedEventRequest{
 		Title:       title,
 		Description: trimOptionalString(req.Description),
 		StartsAt:    req.StartsAt,
 		EndsAt:      req.EndsAt,
 		Focus:       req.Focus,
+		TagIDs:      tagIDs,
 	}, true
+}
+
+func replaceEventTags(ctx context.Context, tx *sql.Tx, userID, eventID string, tagIDs []string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM event_tags WHERE event_id = $1`, eventID); err != nil {
+		return err
+	}
+
+	for _, tagID := range tagIDs {
+		result, err := tx.ExecContext(
+			ctx,
+			`INSERT INTO event_tags (event_id, tag_id)
+			 SELECT $1, id
+			 FROM tags
+			 WHERE id = $2 AND user_id = $3`,
+			eventID,
+			tagID,
+			userID,
+		)
+		if err != nil {
+			return err
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rowsAffected == 0 {
+			return errEventTagNotFound
+		}
+	}
+
+	return nil
+}
+
+func loadEventTags(ctx context.Context, queryer eventTagQueryer, event *eventResponse) error {
+	rows, err := queryer.QueryContext(
+		ctx,
+		`SELECT t.id::text, t.name, t.color, t.created_at, t.updated_at
+		 FROM event_tags et
+		 JOIN tags t ON t.id = et.tag_id
+		 WHERE et.event_id = $1
+		 ORDER BY lower(t.name), t.created_at`,
+		event.ID,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	tags := make([]tagResponse, 0)
+	for rows.Next() {
+		tag, err := scanTag(rows)
+		if err != nil {
+			return err
+		}
+		tags = append(tags, tag)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	event.Tags = tags
+	return nil
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+
+	return result
 }
 
 func eventTagFilterFromRequest(w http.ResponseWriter, r *http.Request) (eventTagFilter, bool) {

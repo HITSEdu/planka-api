@@ -3,6 +3,7 @@ package server
 import (
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -16,9 +17,10 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
+func corsMiddleware(appEnv string, allowedOrigins []string, next http.Handler) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedOrigins))
 	allowAny := false
+	allowLocalDevelopmentOrigins := appEnv == "development"
 
 	for _, origin := range allowedOrigins {
 		origin = normalizeOrigin(origin)
@@ -36,7 +38,7 @@ func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
 		if origin != "" {
 			if allowAny {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
-			} else if _, ok := allowed[origin]; ok {
+			} else if _, ok := allowed[origin]; ok || allowLocalDevelopmentOrigins && isLocalDevelopmentOrigin(origin) {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 			}
 
@@ -67,4 +69,22 @@ func allowedHeaders(r *http.Request) string {
 	}
 
 	return "Authorization, Content-Type"
+}
+
+func isLocalDevelopmentOrigin(origin string) bool {
+	parsedOrigin, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+
+	if parsedOrigin.Scheme != "http" && parsedOrigin.Scheme != "https" {
+		return false
+	}
+
+	switch parsedOrigin.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }

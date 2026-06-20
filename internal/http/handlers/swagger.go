@@ -114,6 +114,7 @@ func openAPISpec() map[string]any {
 						"starts_at":   nullableDateTimeSchema(),
 						"ends_at":     nullableDateTimeSchema(),
 						"focus":       numberSchema(1),
+						"tag_ids":     arraySchema(uuidSchema()),
 					},
 				},
 				"Event": map[string]any{
@@ -126,8 +127,27 @@ func openAPISpec() map[string]any {
 						"ends_at":       nullableDateTimeSchema(),
 						"focus":         numberSchema(1),
 						"access_status": stringSchema("PRIVATE"),
+						"tags":          arraySchema(refSchema("Tag")),
 						"created_at":    dateTimeSchema(),
 						"updated_at":    dateTimeSchema(),
+					},
+				},
+				"TagRequest": map[string]any{
+					"type":     "object",
+					"required": []string{"name", "color"},
+					"properties": map[string]any{
+						"name":  stringSchema("Planning"),
+						"color": stringSchema("#91FFB5"),
+					},
+				},
+				"Tag": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":         uuidSchema(),
+						"name":       stringSchema("Planning"),
+						"color":      stringSchema("#91FFB5"),
+						"created_at": dateTimeSchema(),
+						"updated_at": dateTimeSchema(),
 					},
 				},
 				"Error": map[string]any{
@@ -301,6 +321,69 @@ func pathsSpec() map[string]any {
 			"delete": map[string]any{
 				"tags":       []string{"Events"},
 				"summary":    "Delete event",
+				"security":   bearerSecurity(),
+				"parameters": []any{pathUUIDParameter("id")},
+				"responses": responseMap(
+					noContentResponse("204", "Deleted"),
+					errorResponse("400"),
+					errorResponse("401"),
+					errorResponse("404"),
+				),
+			},
+		},
+		"/tags": map[string]any{
+			"get": map[string]any{
+				"tags":     []string{"Tags"},
+				"summary":  "List tags",
+				"security": bearerSecurity(),
+				"responses": responseMap(
+					response("200", "Tags", arraySchema(refSchema("Tag"))),
+					errorResponse("401"),
+				),
+			},
+			"post": map[string]any{
+				"tags":        []string{"Tags"},
+				"summary":     "Create tag",
+				"security":    bearerSecurity(),
+				"requestBody": jsonBody(refSchema("TagRequest")),
+				"responses": responseMap(
+					response("201", "Created tag", refSchema("Tag")),
+					errorResponse("400"),
+					errorResponse("401"),
+					errorResponse("409"),
+				),
+			},
+		},
+		"/tags/{id}": map[string]any{
+			"get": map[string]any{
+				"tags":       []string{"Tags"},
+				"summary":    "Get tag",
+				"security":   bearerSecurity(),
+				"parameters": []any{pathUUIDParameter("id")},
+				"responses": responseMap(
+					response("200", "Tag", refSchema("Tag")),
+					errorResponse("400"),
+					errorResponse("401"),
+					errorResponse("404"),
+				),
+			},
+			"patch": map[string]any{
+				"tags":        []string{"Tags"},
+				"summary":     "Update tag",
+				"security":    bearerSecurity(),
+				"parameters":  []any{pathUUIDParameter("id")},
+				"requestBody": jsonBody(refSchema("TagRequest")),
+				"responses": responseMap(
+					response("200", "Updated tag", refSchema("Tag")),
+					errorResponse("400"),
+					errorResponse("401"),
+					errorResponse("404"),
+					errorResponse("409"),
+				),
+			},
+			"delete": map[string]any{
+				"tags":       []string{"Tags"},
+				"summary":    "Delete tag",
 				"security":   bearerSecurity(),
 				"parameters": []any{pathUUIDParameter("id")},
 				"responses": responseMap(

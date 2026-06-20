@@ -18,36 +18,15 @@ func loggingMiddleware(next http.Handler) http.Handler {
 }
 
 func corsMiddleware(appEnv string, allowedOrigins []string, next http.Handler) http.Handler {
-	allowed := make(map[string]struct{}, len(allowedOrigins))
-	allowAny := false
-	allowLocalDevelopmentOrigins := appEnv == "development"
-
-	for _, origin := range allowedOrigins {
-		origin = normalizeOrigin(origin)
-		if origin == "*" {
-			allowAny = true
-			continue
-		}
-		if origin != "" {
-			allowed[origin] = struct{}{}
-		}
-	}
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := normalizeOrigin(r.Header.Get("Origin"))
-		if origin != "" {
-			if allowAny {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-			} else if _, ok := allowed[origin]; ok || allowLocalDevelopmentOrigins && isLocalDevelopmentOrigin(origin) {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-			}
-
-			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", allowedHeaders(r))
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Max-Age", "600")
-		}
+		origin := r.Header.Get("Origin")
+		
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Requested-With, Accept, Origin")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+		w.Header().Set("Vary", "Origin")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

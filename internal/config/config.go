@@ -45,10 +45,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	databaseURL, err := stringFromEnv("DATABASE_URL", "postgres://plankauser:postgres@planka-yungoleg.db-msk0.amvera.tech:5432/plankaapi?sslmode=disable")
-	if err != nil {
-		return Config{}, err
-	}
+	databaseURL := stringFromEnv("DATABASE_URL", "postgres://plankauser:postgres@planka-yungoleg.db-msk0.amvera.tech:5432/plankaapi?sslmode=disable")
 
 	return Config{
 		AppEnv:           stringFromEnv("APP_ENV", "development"),
